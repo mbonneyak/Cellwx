@@ -184,9 +184,14 @@ void setup()
 	boolean setTimeError = !setFonaTime(); //make sure the cell can get the time and sets the variable fonaTime
 	estimatedTime = timeToSeconds(fonaTime) * 1000; //starts estimated time to the current time
 	prevMillis = millis(); //this is a setup fir the updateTimeEst() func
-	previousTime = estimatedTime/1000; //We'll use previousTime to calculate the error in our estimatedTime and make adjustements to our timerCalibration
 	estimatedTimePrev = estimatedTime; 
-	Serial.print(F("\nCurrent Time = ")); Serial.println(estimatedTime / 1000);
+	previousTime = estimatedTimePrev/1000;
+	Serial.print(F("  currentTime: ")); Serial.println(currentTime);
+	Serial.print(F("    =")); secondsToText(currentTime); Serial.println();
+	Serial.print(F("  estimatedTime: ")); Serial.println(estimatedTime);
+	Serial.print(F("    =")); secondsToText(estimatedTime); Serial.println();
+	Serial.print(F("  previousTime: ")); Serial.println(previousTime);
+	Serial.print(F("  estimatedTimePRev: ")); Serial.println(estimatedTimePrev);
 
 	//// Get Wakeup Schedule
 	//if (debugMode){
@@ -250,11 +255,6 @@ void loop()
 			ranWindLoop = true;			
 		}
 
-		//delays asny code until a pulse is found
-		while (prevPulse && !wsPulse){
-
-		}
-
 		if (wdPulse){//If we've received a wind direction pulse, start looking for a wind speed pulse
 			//detachInterrupt(0); //Stop looking for wind direction pulses
 			//attachInterrupt(1, ISR_for_Speed, RISING); //Start looking for wind speed pulses
@@ -262,6 +262,11 @@ void loop()
 			WDInterval = WDC - WDP; //Calculate the new wind direction interval
 			wdPulse = false; //Reset the Pulse flag to false now that we've processed the pulse
 			lastWindSense = estimatedTime;
+		}
+
+		//delays any code until a pulse is found
+		while (prevPulse && !wsPulse){
+
 		}
 
 		if (wsPulse){//If we've received a wind speed pulse, start looking for a wind direction pulse.
@@ -272,7 +277,7 @@ void loop()
 			WSInterval = WSC - WSP; //Calculate the new wind speed interval
 			wsPulse = false; //Reset the Pulse flag to false now that we've processed the pulse
 
-			if ((WSInterval / abs(WSInterval - prevWSInterval) > 4) && (WDInterval / abs(WDInterval - prevWDInterval) > 4) && WSInterval > 15000 && WSInterval < 2000000 && WDC > WSP && WDC){ //Checking to see if pulses are within spec.
+			if ((WSInterval / abs(WSInterval - prevWSInterval) > 4) && (WDInterval / abs(WDInterval - prevWDInterval) > 4) && WSInterval > 15000 && WSInterval < 2000000 && WDC > WSP && WDC < WSC){ //Checking to see if pulses are within spec.
 				Serial.println(F("  calculating Wind speed and direction"));
 				Serial.println(F("    Valid Pulse"));
 				averageCount++;
@@ -382,19 +387,18 @@ void loop()
 			Serial.print(F("  estimatedTimePRev: ")); Serial.println(estimatedTimePrev/1000);
 			unsigned long tempTime = estimatedTime;
 			updateTimeEst();
-			long timeError = (currentTime - previousTime) - (estimatedTime/1000 - estimatedTimePrev/1000); //Calculate the error between the estimated time and the actual time.
+			long timeError = ((long)currentTime - (long)previousTime) - ((long)estimatedTime / 1000 - (long)estimatedTimePrev / 1000); //Calculate the error between the estimated time and the actual time.
 			Serial.print(F("Time Error: ")); Serial.println(timeError);
-			timerAdjustment = ((currentTime - previousTime) / (estimatedTime/1000 - estimatedTimePrev/1000)) - 1000;
+			timerAdjustment = (((long)currentTime - (long)previousTime) / ((long)estimatedTime / 1000 - (long)estimatedTimePrev / 1000)) - 1000;
 			Serial.print(F("  timerAdjustment: ")); Serial.println(timerAdjustment);
-			timerCalibration += timerAdjustment;
-
+		
 			if (timerAdjustment >= 40){
 				timerAdjustment = 40;
 			}
 			else if (timerAdjustment <= -40){
 				timerAdjustment = -40;
 			}
-
+			timerCalibration += timerAdjustment;
 			if (timerCalibration >= 1300){
 				timerCalibration = 1300;
 			}
@@ -450,26 +454,26 @@ boolean startFONA(){
 	boolean started = false;
 	byte attempts = 1;
 	while (!started && attempts < 10){
-		Serial.print(F("\nAttempt #")); Serial.println(attempts);
+		Serial.print(F("\n  Attempt #")); Serial.println(attempts);
 		delay(100);
 		if (digitalRead(FONA_PS_PIN) != HIGH){ //if FONA is off
 			digitalWrite(FONA_KEY_PIN, HIGH); //Turn on the FONA
 			delay(2000); //Per the FONA manual, it takes a 2 second pulse to turn on the FONA
 			digitalWrite(FONA_KEY_PIN, LOW); //Put the pin back to low to save power and so we are prepared to turn off the FONA later with another 2 second pulse
 		}
-		Serial.println("  Initializing FONA");
+		Serial.println("    Initializing FONA");
 		fonaSS.begin(4800); //Start FONA Communication
 		//See if the FONA is responding
 		if (!fona.begin(fonaSS)){
-			Serial.print(F("    Couldn't find FONA"));
+			Serial.print(F("      Couldn't find FONA"));
 			attempts++;
 			delay(2000);
 		}
 		else {
-			Serial.println(F("    FONA has started"));
+			Serial.println(F("      FONA has started"));
 			byte imeiLen = fona.getIMEI(IMEI); //Get the IMEI Number.  We'll use this as a unique identifier for the Weather Station.
 			delay(100);
-			Serial.print(F("    FONA IMEI = ")); Serial.print(IMEI);
+			Serial.print(F("      FONA IMEI = ")); Serial.print(IMEI);
 			fona.setGPRSNetworkSettings(F("wap.cingular"), F("wap@cingulargprs.com"), F("cingular1"));
 			started = true;
 		}
@@ -486,27 +490,27 @@ boolean startNetwork(){
 	Serial.print(F("\n\n-----Checking network status-----\n"));
 	byte attempts = 1;
 	while (netstat != 1 && netstat != 5 && attempts < 10){
-		Serial.print(F("Attempt #")); Serial.print(attempts);
+		Serial.print(F("  Attempt #")); Serial.print(attempts);
 		netstat = fona.getNetworkStatus(); //get the network status	
-		Serial.print(F("\n  Network status ")); Serial.print(netstat); Serial.print(F(": "));
+		Serial.print(F("\n    Network status ")); Serial.print(netstat); Serial.print(F(": "));
 		switch (netstat) {
 		case 0:
-			Serial.println(F("Not registered"));
+			Serial.println(F("  Not registered"));
 			break;
 		case 1:
-			Serial.println(F("Registered (home)"));
+			Serial.println(F("  Registered (home)"));
 			break;
 		case 2:
-			Serial.println(F("Not registered (searching)"));
+			Serial.println(F("  Not registered (searching)"));
 			break;
 		case 3:
-			Serial.println(F("Denied"));
+			Serial.println(F("  Denied"));
 			break;
 		case 4:
-			Serial.println(F("Unknown"));
+			Serial.println(F("  Unknown"));
 			break;
 		case 5:
-			Serial.println(F("Registered roaming"));
+			Serial.println(F("  Registered roaming"));
 			break;
 		}
 		if (netstat != 5 && netstat != 1){
@@ -549,13 +553,13 @@ boolean setFonaTime(){
 	boolean fonaNTPSync = fona.enableNTPTimeSync(true, F("pool.ntp.org"));
 	delay(2000); //Allow time for the command to complete
 	if (!fonaNTPSync){
-		Serial.println(F("NTP Time Sync Failed"));
+		Serial.println(F("  NTP Time Sync Failed"));
 	}
 	else {
-		Serial.println(F("NTP Time Sync Successful"));
+		Serial.println(F("  NTP Time Sync Successful"));
 	}
 	fona.getTime(fonaTime, 23);  // make sure replybuffer is at least 23 bytes!
-	Serial.print(F("Time = ")); Serial.println(fonaTime);
+	Serial.print(F("    Time = ")); Serial.println(fonaTime);
 
 	return fonaNTPSync;
 }
