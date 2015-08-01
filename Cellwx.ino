@@ -133,8 +133,8 @@ void ISR_for_Direction() {
 	//We aren't allowed to do much in ISRs and variables used within ISRs should generally be declared as volatile 
 	WDP = WDC;
 	WDC = micros();
-	attachInterrupt(1, ISR_for_Speed, RISING);
 	wdPulse = true; //Set flag indicating that a wind direction pulse was detected
+	attachInterrupt(1, ISR_for_Speed, RISING);
 }
 
 
@@ -344,12 +344,12 @@ void loop()
 		short humidity1;
 		short humidity2 = 0;
 		char textOut[5];
-		
+
 		//get Humidity data		
 		if (!getDHTData(dht1, temp1, humidity1)){
 			//send error for getting temp and humidity
 		}
-
+		
 		//start putting stuff into urls
 		buildDataURL(intToText(minWS * 10, 4, textOut), 49, 52);	//mws
 		buildDataURL(intToText(windSpeedAvg * 10, 4, textOut), 58, 61);		//aws
@@ -549,10 +549,13 @@ boolean setFonaTime(){
 	boolean fonaNTPSync = fona.enableNTPTimeSync(true, F("pool.ntp.org"));
 	delay(2000); //Allow time for the command to complete
 	if (!fonaNTPSync){
+		Serial.println(F("NTP Time Sync Failed"));
 	}
 	else {
+		Serial.println(F("NTP Time Sync Successful"));
 	}
 	fona.getTime(fonaTime, 23);  // make sure replybuffer is at least 23 bytes!
+	Serial.print(F("Time = ")); Serial.println(fonaTime);
 
 	return fonaNTPSync;
 }
@@ -638,7 +641,7 @@ boolean endNetwork(){
 
 
 boolean stopFona(){
-	Serial.println(F("  Turning off Fona"));
+	Serial.println(F("T  urning off Fona"));
 	byte attempts = 1;
 	boolean running = HIGH;
 	while (running && attempts < 10) {
