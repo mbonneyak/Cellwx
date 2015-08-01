@@ -50,7 +50,6 @@ volatile unsigned long WSP;
 volatile unsigned long WDC;
 volatile unsigned long WDP;
 volatile boolean prevPulse = false;
-volatile boolean possiblePulse = false;
 unsigned long lastWindSense;
 float windSpeedAvg = 0;
 float windDirectionAvg = 0;
@@ -115,17 +114,18 @@ void ISR_for_Speed() {
 	//We aren't allowed to do much in ISRs and variables used within ISRs should generally be declared as volatile
 	WSP = WSC;
 	WSC = micros();
+	wsPulse = true; //Set flag indicating that a wind speed pulse was detected
 	if (!prevPulse){
 		prevPulse = true;
 		attachInterrupt(0, ISR_for_Direction, RISING); //Start looking for wind direction pulses
 		detachInterrupt(1); //Detach Interrupt for Wind Speed Sensor
 	}
 	else{
-		possiblePulse = true;
+		prevPulse = false;
 		detachInterrupt(1);
 	}
-
-
+	
+	
 }
 
 void ISR_for_Direction() {
@@ -134,7 +134,7 @@ void ISR_for_Direction() {
 	WDP = WDC;
 	WDC = micros();
 	attachInterrupt(1, ISR_for_Speed, RISING);
-	detachInterrupt(0);
+	wdPulse = true; //Set flag indicating that a wind direction pulse was detected
 }
 
 
@@ -184,8 +184,9 @@ void setup()
 	boolean setTimeError = !setFonaTime(); //make sure the cell can get the time and sets the variable fonaTime
 	estimatedTime = timeToSeconds(fonaTime) * 1000; //starts estimated time to the current time
 	prevMillis = millis(); //this is a setup fir the updateTimeEst() func
-	previousTime = estimatedTime / 1000; //We'll use previousTime to calculate the error in our estimatedTime and make adjustements to our timerCalibration
-	estimatedTimePrev = estimatedTime;
+	previousTime = estimatedTime/1000; //We'll use previousTime to calculate the error in our estimatedTime and make adjustements to our timerCalibration
+	estimatedTimePrev = estimatedTime; 
+	Serial.print(F("\nCurrent Time = ")); Serial.println(estimatedTime / 1000);
 
 	//// Get Wakeup Schedule
 	//if (debugMode){
@@ -239,62 +240,73 @@ void loop()
 	boolean firstWindLoop = true;
 	boolean ranWindLoop = false;
 	//Serial.println(F("\n----------Start of Loop----------\n"));
-	while (getVoltage(V_BAT_PIN) > 3600 && estimatedTime > senseTime * 1000 && estimatedTime <= (senseTime * 1000 + duration * 1000)){
+	while (getVoltage(V_BAT_PIN) > 3600 && estimatedTime > senseTime * 1000 && estimatedTime <= (senseTime * 1000 + duration * 1000)){	
 		if (firstWindLoop){
-			prevPulse = false;
-			possiblePulse = false;
 			attachInterrupt(1, ISR_for_Speed, RISING);
+			Serial.print(F("Sensing duration is: "));  Serial.print(duration);
+			wsPulse = true; //this seems weird to me
+			wdPulse = false;
+			firstWindLoop = false;
+			ranWindLoop = true;			
 		}
 
-		//delays any code until a pulse is found
-		while (!possiblePulse){
+		//delays asny code until a pulse is found
+		while (prevPulse && !wsPulse){
 
 		}
-		
-		Serial.println(F("\n-----Possible Pulse-----"));
-		detachInterrupt(0); //Detach Interrupt for Wind Direction Sensor
-		detachInterrupt(1); //Detach Interrupt for Wind Speed Sensor	
-		lastWindSense = estimatedTime;
-		prevWDInterval = WDInterval;
-		prevWSInterval = WSInterval;
-		WDInterval = WDC - WDP;
-		WSInterval = WSC - WSP;
-		print_WS_and_WD_Data();
 
-		if ((WSInterval / abs(WSInterval - prevWSInterval) > 4) && (WDInterval / abs(WDInterval - prevWDInterval) > 4) && WSInterval > 15000 && WSInterval < 2000000 && WDC > WSP && WDC < WSC){ //Checking to see if pulses are within spec.
-			Serial.println(F("  calculating Wind speed and direction"));
-			Serial.println(F("    Valid Pulse"));
-			averageCount++;
-			float windSpeed = intervalToMPH(WSInterval);
-			float windDir = intervalToDir(WSInterval, WDC - WSP);
-			windSpeedAvg = averager(averageCount, windSpeedAvg, windSpeed);
-			windDirectionAvg = averager(averageCount, windDirectionAvg, windDir);
-			Serial.print(F("      windSpeed: ")); Serial.println(windSpeed);
-			Serial.print(F("      windDir: ")); Serial.println(windDir);
-			if (windSpeed > maxWS){
-				maxWS = windSpeed;
-				Serial.print(F("      maxWS: ")); Serial.println(maxWS);
-			}
-			if (windSpeed < minWS){
-				minWS = windSpeed;
-				Serial.print(F("      minWS: ")); Serial.println(minWS);
-			}
-
-			if (windDir > maxWD){
-				maxWD = windDir;
-				Serial.print(F("      maxWD: ")); Serial.println(maxWD);
-			}
-			if (windDir < minWD){
-				minWD = windDir;
-				Serial.print(F("      minWD: ")); Serial.println(minWD);
-			}
+		if (wdPulse){//If we've received a wind direction pulse, start looking for a wind speed pulse
+			//detachInterrupt(0); //Stop looking for wind direction pulses
+			//attachInterrupt(1, ISR_for_Speed, RISING); //Start looking for wind speed pulses
+			prevWDInterval = WDInterval;
+			WDInterval = WDC - WDP; //Calculate the new wind direction interval
+			wdPulse = false; //Reset the Pulse flag to false now that we've processed the pulse
+			lastWindSense = estimatedTime;
 		}
-		else{
-			Serial.println(F("  Invalid Pulse"));
-			firstWindLoop = true;
-		}
-		lastWindSense = estimatedTime;
 
+		if (wsPulse){//If we've received a wind speed pulse, start looking for a wind direction pulse.
+			Serial.println(F("\n-----Sensing Wind-----"));
+			//detachInterrupt(1); //Stop looking for wind speed pulses
+			//attachInterrupt(0, ISR_for_Direction, RISING); //Start looking for wind direction pulses
+			prevWSInterval = WSInterval;
+			WSInterval = WSC - WSP; //Calculate the new wind speed interval
+			wsPulse = false; //Reset the Pulse flag to false now that we've processed the pulse
+
+			if ((WSInterval / abs(WSInterval - prevWSInterval) > 4) && (WDInterval / abs(WDInterval - prevWDInterval) > 4) && WSInterval > 15000 && WSInterval < 2000000 && WDC > WSP && WDC){ //Checking to see if pulses are within spec.
+				Serial.println(F("  calculating Wind speed and direction"));
+				Serial.println(F("    Valid Pulse"));
+				averageCount++;
+				float windSpeed = intervalToMPH(WSInterval);
+				float windDir = intervalToDir(WSInterval, WDC - WSP);
+				windSpeedAvg = averager(averageCount, windSpeedAvg, windSpeed);
+				windDirectionAvg = averager(averageCount, windDirectionAvg, windDir);
+				Serial.print(F("      windSpeed: ")); Serial.println(windSpeed);
+				Serial.print(F("      windDir: ")); Serial.println(windDir);
+				if (windSpeed > maxWS){
+					maxWS = windSpeed;
+					Serial.print(F("      maxWS: ")); Serial.println(maxWS);
+				}
+				if (windSpeed < minWS){
+					minWS = windSpeed;
+					Serial.print(F("      minWS: ")); Serial.println(minWS);
+				}
+
+				if (windDir > maxWD){
+					maxWD = windDir;
+					Serial.print(F("      maxWD: ")); Serial.println(maxWD);
+				}
+				if (windDir < minWD){
+					minWD = windDir;
+					Serial.print(F("      minWD: ")); Serial.println(minWD);
+				}
+			}
+			else{
+				Serial.println(F("  Invalid Pulse"));
+				prevPulse = false;
+				attachInterrupt(1, ISR_for_Speed, RISING);
+			}
+			lastWindSense = estimatedTime;
+		}
 
 		updateTimeEst();
 
@@ -313,7 +325,7 @@ void loop()
 		duration = getSenseDuration(senseDuration, estimatedTime / 1000);//Returns value in Seconds format
 		Serial.println(F("  Done Sensing Wind"));
 		Serial.print(F("  Next senseTime: ")); secondsToText(senseTime); Serial.println();
-		Serial.print(F("  Next sendTime: ")); secondsToText(sendTime); Serial.println();
+		Serial.print(F("  Next sendTime: ")); secondsToText(sendTime); Serial.println();	
 	}
 
 
@@ -332,7 +344,7 @@ void loop()
 		short humidity1;
 		short humidity2 = 0;
 		char textOut[5];
-
+		
 		//get Humidity data		
 		if (!getDHTData(dht1, temp1, humidity1)){
 			//send error for getting temp and humidity
@@ -364,15 +376,15 @@ void loop()
 			currentTime = timeToSeconds(fonaTime); //Convert seconds to millis			
 			Serial.print(F("  currentTime: ")); Serial.println(currentTime);
 			Serial.print(F("    =")); secondsToText(currentTime); Serial.println();
-			Serial.print(F("  estimatedTime: ")); Serial.println(estimatedTime / 1000);
-			Serial.print(F("    =")); secondsToText(estimatedTime / 1000); Serial.println();
+			Serial.print(F("  estimatedTime: ")); Serial.println(estimatedTime/1000);
+			Serial.print(F("    =")); secondsToText(estimatedTime/1000); Serial.println();
 			Serial.print(F("  previousTime: ")); Serial.println(previousTime);
-			Serial.print(F("  estimatedTimePRev: ")); Serial.println(estimatedTimePrev / 1000);
+			Serial.print(F("  estimatedTimePRev: ")); Serial.println(estimatedTimePrev/1000);
 			unsigned long tempTime = estimatedTime;
 			updateTimeEst();
-			long timeError = (currentTime - previousTime) - (estimatedTime / 1000 - estimatedTimePrev / 1000); //Calculate the error between the estimated time and the actual time.
+			long timeError = (currentTime - previousTime) - (estimatedTime/1000 - estimatedTimePrev/1000); //Calculate the error between the estimated time and the actual time.
 			Serial.print(F("Time Error: ")); Serial.println(timeError);
-			timerAdjustment = ((currentTime - previousTime) / (estimatedTime / 1000 - estimatedTimePrev / 1000)) - 1000;
+			timerAdjustment = ((currentTime - previousTime) / (estimatedTime/1000 - estimatedTimePrev/1000)) - 1000;
 			Serial.print(F("  timerAdjustment: ")); Serial.println(timerAdjustment);
 			timerCalibration += timerAdjustment;
 
@@ -407,7 +419,7 @@ void loop()
 		updateTimeEst();
 		sendTime = getTargetTime(sendInterval, estimatedTime / 1000);//Returns value in Seconds format
 	}//end of send Data
-
+	
 	sleep();
 }
 
@@ -537,13 +549,10 @@ boolean setFonaTime(){
 	boolean fonaNTPSync = fona.enableNTPTimeSync(true, F("pool.ntp.org"));
 	delay(2000); //Allow time for the command to complete
 	if (!fonaNTPSync){
-		Serial.println(F("  NTP Time Sync Failed"));
 	}
 	else {
-		Serial.println(F("  NTP Time Sync Successful"));
 	}
 	fona.getTime(fonaTime, 23);  // make sure replybuffer is at least 23 bytes!
-	Serial.print(F("    Time = ")); Serial.println(fonaTime);
 
 	return fonaNTPSync;
 }
@@ -834,20 +843,4 @@ void sleep(){
 		Serial.print(F("    timerCalibration: ")); Serial.println(timerCalibration);
 		Serial.print(F("    Current time is ")); secondsToText(estimatedTime / 1000); Serial.println();
 	}
-}
-
-void print_WS_and_WD_Data(){
-	Serial.print(F("  Current Time = ")); secondsToText(estimatedTime / 1000); Serial.println();
-	Serial.print(F("    WSP="));
-	Serial.print(WSP);
-	Serial.print(F(" WSC="));
-	Serial.print(WSC);
-	Serial.print(F(" WSInterval="));
-	Serial.println(WSInterval);
-	Serial.print(F("    WDP="));
-	Serial.print(WDP);
-	Serial.print(F(" WDC="));
-	Serial.print(WDC);
-	Serial.print(F(" WDInterval="));
-	Serial.println(WDInterval);
 }
