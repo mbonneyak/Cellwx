@@ -263,7 +263,7 @@ void loop()
 	boolean firstWindLoop = true;
 	boolean ranWindLoop = false;
 	//Serial.println(F("\n----------Start of Loop----------\n"));
-	while (true){//(getVoltage(V_BAT_PIN) > 3600 && estimatedTime > senseTime * 1000 && estimatedTime <= (senseTime * 1000 + duration * 1000)){
+	while (getVoltage(V_BAT_PIN) > 3600 && estimatedTime > senseTime * 1000 && estimatedTime <= (senseTime * 1000 + duration * 1000)){
 		if (firstWindLoop){
 			Serial.print(F("Sensing duration is: "));  Serial.println(duration);
 			firstWindLoop = false;
