@@ -105,38 +105,51 @@ Pulse Validation Criteria:
 If WSP, WSC, WDP, WDC, WSInterval, WDInterval, prevWSInterval, prevWDInteval all meet these criteria, valid wind speed and wind direction can be calculated.
 
 */
+
+void ISR_Start(){
+	detachInterrupt(0);
+	detachInterrupt(1);
+	attachInterrupt(0, ISR_for_Direction1, RISING);
+	attachInterrupt(1, ISR_for_Speed1, RISING);
+}
+
+
 void ISR_for_Direction1() {
-	windDirectionPulse1 = micros();
+	windDirectionPulse1 = millis()*1000;
 	detachInterrupt(0);
 	attachInterrupt(0, ISR_for_Direction2, RISING);
+	delayMicroseconds(5000);
 }
 
 void ISR_for_Direction2() {
-	windDirectionPulse2 = micros();
+	windDirectionPulse2 = millis() * 1000;
 	detachInterrupt(0);
 	attachInterrupt(0, ISR_for_Direction3, RISING);
+	delayMicroseconds(5000);
 }
 
 void ISR_for_Direction3() {
-	windDirectionPulse3 = micros();
+	windDirectionPulse3 = millis() * 1000;
 	detachInterrupt(0);
 	wdpulse = true;
 }
 
 void ISR_for_Speed1() {
-	windSpeedPulse1 = micros();
+	windSpeedPulse1 = millis() * 1000;
 	detachInterrupt(1);
 	attachInterrupt(1, ISR_for_Speed2, RISING);
+	delayMicroseconds(5000);
 }
 
 void ISR_for_Speed2() {
-	windSpeedPulse2 = micros();
+	windSpeedPulse2 = millis() * 1000;
 	detachInterrupt(1);
 	attachInterrupt(1, ISR_for_Speed3, RISING);
+	delayMicroseconds(5000);
 }
 
 void ISR_for_Speed3() {
-	windSpeedPulse3 = micros();
+	windSpeedPulse3 = millis() * 1000;
 	detachInterrupt(1);
 	wspulse = true;
 
@@ -250,38 +263,46 @@ void loop()
 	boolean firstWindLoop = true;
 	boolean ranWindLoop = false;
 	//Serial.println(F("\n----------Start of Loop----------\n"));
-	while (getVoltage(V_BAT_PIN) > 3600 && estimatedTime > senseTime * 1000 && estimatedTime <= (senseTime * 1000 + duration * 1000)){
+	while (true){//(getVoltage(V_BAT_PIN) > 3600 && estimatedTime > senseTime * 1000 && estimatedTime <= (senseTime * 1000 + duration * 1000)){
 		if (firstWindLoop){
 			Serial.print(F("Sensing duration is: "));  Serial.println(duration);
 			firstWindLoop = false;
 			ranWindLoop = true;
 		}
+
 		Serial.println(F("\n-----Sensing Wind-----"));
 		wspulse = false;
 		wdpulse = false;
-		attachInterrupt(0, ISR_for_Direction1, RISING);
-		attachInterrupt(1, ISR_for_Speed1, RISING);
+
+		attachInterrupt(0, ISR_Start, RISING);
+		attachInterrupt(1, ISR_Start, RISING);
 
 		//waits for the pulses
-		while (!wspulse || !wdpulse){}
+		while (estimatedTime <= (senseTime * 1000 + duration * 1000) && !wspulse || !wdpulse){
+			updateTimeEst();
+		}
+
 		long prevWDInterval = windDirectionPulse2 - windDirectionPulse1;;
 		long prevWSInterval = windSpeedPulse2 - windSpeedPulse1;
 		long WDInterval = windDirectionPulse3 - windDirectionPulse2;
 		long WSInterval = windSpeedPulse3 - windSpeedPulse2;
 		long dirSearch;
+		boolean canCalculate = false;
 
 		if (windDirectionPulse3>windSpeedPulse2 && windDirectionPulse3 < windSpeedPulse3){
 			dirSearch = windDirectionPulse3 - windSpeedPulse2;
+			canCalculate = true;
 		}
 		else if (windDirectionPulse2>windSpeedPulse2 && windDirectionPulse2 < windSpeedPulse3){
 			dirSearch = windDirectionPulse2 - windSpeedPulse2;
+			canCalculate = true;
 		}
 		else{
-			Serial.println(F("Both were false!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"));
+			Serial.println(F("Other Situation"));
 		}
 		print_WS_and_WD_Data();
-		if ((WSInterval / abs(WSInterval - prevWSInterval) > 4) && (WDInterval / abs(WDInterval - prevWDInterval) > 4) && WSInterval > 15000 && WSInterval < 2000000){ //Checking to see if pulses are within spec.
-			Serial.println(F("  calculating Wind speed and direction"));
+		Serial.println(F("  calculating Wind speed and direction"));
+		if ((WSInterval / abs(WSInterval - prevWSInterval) > 4) && (WDInterval / abs(WDInterval - prevWDInterval) > 4) && WSInterval > 15000 && WSInterval < 2000000 && canCalculate){ //Checking to see if pulses are within spec.
 			Serial.println(F("    Valid Pulse"));
 			averageCount++;
 			float windSpeed = intervalToMPH(WSInterval);
