@@ -39,17 +39,14 @@ unsigned long currentTime;  //the last time read by the fona module
 unsigned long sendTime;
 unsigned long senseTime;
 long duration;
-volatile boolean pulse = false;
+volatile boolean wspulse = false;
+volatile boolean wdpulse = false;
 volatile unsigned long windSpeedPulse3;
 volatile unsigned long windDirectionPulse3;
 volatile unsigned long windSpeedPulse2;
 volatile unsigned long windSpeedPulse1;
 volatile unsigned long windDirectionPulse2;
 volatile unsigned long windDirectionPulse1;
-long prevWSInterval;
-long prevWDInterval;
-long WSInterval;
-long WDInterval;
 unsigned long lastWindSense;
 float windSpeedAvg = 0;
 float windDirectionAvg = 0;
@@ -110,43 +107,39 @@ If WSP, WSC, WDP, WDC, WSInterval, WDInterval, prevWSInterval, prevWDInteval all
 */
 void ISR_for_Direction1() {
 	windDirectionPulse1 = micros();
-	attachInterrupt(1, ISR_for_Speed1, RISING);
 	detachInterrupt(0);
-	delayMicroseconds(100000);
-}
-
-void ISR_for_Speed1() {
-	windSpeedPulse1 = micros();
 	attachInterrupt(0, ISR_for_Direction2, RISING);
-	detachInterrupt(1);
-	delayMicroseconds(100000);
 }
 
 void ISR_for_Direction2() {
 	windDirectionPulse2 = micros();
-	attachInterrupt(1, ISR_for_Speed2, RISING);
 	detachInterrupt(0);
-	delayMicroseconds(100000);
-}
-
-void ISR_for_Speed2() {
-	windSpeedPulse2 = micros();
 	attachInterrupt(0, ISR_for_Direction3, RISING);
-	detachInterrupt(1);
-	delayMicroseconds(100000);
 }
 
 void ISR_for_Direction3() {
 	windDirectionPulse3 = micros();
-	attachInterrupt(1, ISR_for_Speed3, RISING);
 	detachInterrupt(0);
-	delayMicroseconds(100000);
+	wdpulse = true;
+}
+
+void ISR_for_Speed1() {
+	windSpeedPulse1 = micros();
+	detachInterrupt(1);
+	attachInterrupt(1, ISR_for_Speed2, RISING);
+}
+
+void ISR_for_Speed2() {
+	windSpeedPulse2 = micros();
+	detachInterrupt(1);
+	attachInterrupt(1, ISR_for_Speed3, RISING);
 }
 
 void ISR_for_Speed3() {
 	windSpeedPulse3 = micros();
-	pulse = true;
 	detachInterrupt(1);
+	wspulse = true;
+
 }
 
 
@@ -264,24 +257,35 @@ void loop()
 			ranWindLoop = true;
 		}
 		Serial.println(F("\n-----Sensing Wind-----"));
-		pulse = false;
+		wspulse = false;
+		wdpulse = false;
 		attachInterrupt(0, ISR_for_Direction1, RISING);
+		attachInterrupt(1, ISR_for_Speed1, RISING);
 
 		//waits for the pulses
-		while (!pulse){}
+		while (!wspulse || !wdpulse){}
+		long prevWDInterval = windDirectionPulse2 - windDirectionPulse1;;
+		long prevWSInterval = windSpeedPulse2 - windSpeedPulse1;
+		long WDInterval = windDirectionPulse3 - windDirectionPulse2;
+		long WSInterval = windSpeedPulse3 - windSpeedPulse2;
+		long dirSearch;
 
-
-		prevWDInterval = windDirectionPulse2 - windDirectionPulse1;
-		prevWSInterval = windSpeedPulse2 - windSpeedPulse1;
-		WDInterval = windDirectionPulse3 - windDirectionPulse2;
-		WSInterval = windSpeedPulse3 - windSpeedPulse2;
-
+		if (windDirectionPulse3>windSpeedPulse2 && windDirectionPulse3 < windSpeedPulse3){
+			dirSearch = windDirectionPulse3 - windSpeedPulse2;
+		}
+		else if (windDirectionPulse2>windSpeedPulse2 && windDirectionPulse2 < windSpeedPulse3){
+			dirSearch = windDirectionPulse2 - windSpeedPulse2;
+		}
+		else{
+			Serial.println(F("Both were false!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"));
+		}
+		print_WS_and_WD_Data();
 		if ((WSInterval / abs(WSInterval - prevWSInterval) > 4) && (WDInterval / abs(WDInterval - prevWDInterval) > 4) && WSInterval > 15000 && WSInterval < 2000000){ //Checking to see if pulses are within spec.
 			Serial.println(F("  calculating Wind speed and direction"));
 			Serial.println(F("    Valid Pulse"));
 			averageCount++;
 			float windSpeed = intervalToMPH(WSInterval);
-			float windDir = intervalToDir(WSInterval, windDirectionPulse3 - windSpeedPulse2);
+			float windDir = intervalToDir(WSInterval, dirSearch);
 			windSpeedAvg = averager(averageCount, windSpeedAvg, windSpeed);
 			windDirectionAvg = averager(averageCount, windDirectionAvg, windDir);
 			Serial.print(F("      windSpeed: ")); Serial.println(windSpeed);
@@ -835,7 +839,7 @@ void sleep(){
 		// The millis timer (driven by 8mhz external crystal) halts while the CPU is powered off.
 		LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);//Code stops here until 8s timer expires. Time keeping during power down is based upon inaccurate clock internal to PLC instead of external 8mhz crystal.
 		prevMillis = millis();//millis timer is working again so grab the current millis value
-		estimatedTime += sleepDuration * timerCalibration; //add the calibrated sleep duration back into the estimated time.
+		estimatedTime += sleepDuration * 1100;//timerCalibration; //add the calibrated sleep duration back into the estimated time.
 		Serial.println(F("  Awake"));
 		Serial.print(F("    timerCalibration: ")); Serial.println(timerCalibration);
 		Serial.print(F("    Current time is ")); secondsToText(estimatedTime / 1000); Serial.println();
@@ -844,16 +848,16 @@ void sleep(){
 
 void print_WS_and_WD_Data(){
 	Serial.print(F("  Current Time = ")); secondsToText(estimatedTime / 1000); Serial.println();
-	Serial.print(F("    WSP="));
-	Serial.print(windSpeedPulse2);
-	Serial.print(F(" WSC="));
-	Serial.print(windSpeedPulse3);
-	Serial.print(F(" WSInterval="));
-	Serial.println(WSInterval);
-	Serial.print(F("    WDP="));
+	Serial.print(F("    WD1="));
+	Serial.print(windDirectionPulse1);
+	Serial.print(F(" WD2="));
 	Serial.print(windDirectionPulse2);
-	Serial.print(F(" WDC="));
-	Serial.print(windDirectionPulse3);
-	Serial.print(F(" WDInterval="));
-	Serial.println(WDInterval);
+	Serial.print(F(" WD3="));
+	Serial.println(windDirectionPulse3);
+	Serial.print(F("    WS1="));
+	Serial.print(windSpeedPulse1);
+	Serial.print(F(" WS2="));
+	Serial.print(windSpeedPulse2);
+	Serial.print(F(" WS3="));
+	Serial.println(windSpeedPulse3);
 }
