@@ -29,12 +29,10 @@ boolean debugMode = true;
 char IMEI[] = "123456789123456";
 char getSettingsURL[] = "www.cellwx.org/settings.php?imei=XXXXXXXXXXXXXXX&time=XX";
 char sendLogEntryURL[] = "www.cellwx.org/log.php?imei=XXXXXXXXXXXXXXX&messageid=XX";
-char sendDataURL[] = "www.cellwx.org/data.php?imei=000000000000000&mws=0000&aws=0000&pws=0000&wd=000&t1=0000&t2=0000&h1=000&h2=000&slp=0000&r3=000&r6=000&r24=000&vb=0000&vs=0000";
+char sendDataURL[] = "www.cellwx.org/data.php?imei=000000000000000&mws=0000&aws=0000&pws=0000&wd=000&t1=0000&t2=0000&h1=000&h2=000&slp=0000&r3=000&r6=000&r24=000&vb=0000&vs=0000&mwd=000&pwd=000";
 char fonaTime[24];
 unsigned long estimatedTime; //This is UNIX Timestamp of the estimated time kept during Power Down modes
-unsigned long estimatedTimePrev;  //estimatedTime Lasr time we did calibration
 unsigned long prevMillis;
-unsigned long previousTime;	//CurrentTime last time we did calibration
 unsigned long currentTime;  //the last time read by the fona module
 unsigned long sendTime;
 unsigned long senseTime;
@@ -47,6 +45,9 @@ volatile unsigned long windSpeedPulse2;
 volatile unsigned long windSpeedPulse1;
 volatile unsigned long windDirectionPulse2;
 volatile unsigned long windDirectionPulse1;
+volatile unsigned long debounceDir;
+volatile unsigned long debounceWin;
+
 unsigned long lastWindSense;
 float windSpeedAvg = 0;
 float windDirectionAvg = 0;
@@ -106,6 +107,7 @@ If WSP, WSC, WDP, WDC, WSInterval, WDInterval, prevWSInterval, prevWDInteval all
 
 */
 
+//pretty sure this is needed but I'm keeping until I rewrite all the interrupts to make them two instead of 6 seperate ones;
 void ISR_Start(){
 	detachInterrupt(0);
 	detachInterrupt(1);
@@ -115,44 +117,55 @@ void ISR_Start(){
 
 
 void ISR_for_Direction1() {
-	windDirectionPulse1 = millis()*1000;
-	detachInterrupt(0);
-	attachInterrupt(0, ISR_for_Direction2, RISING);
-	delayMicroseconds(5000);
+	if (debounceDir < millis()){
+		windDirectionPulse1 = micros();
+		detachInterrupt(0);
+		attachInterrupt(0, ISR_for_Direction2, RISING);
+		debounceDir = millis() + 10;
+	}
 }
 
 void ISR_for_Direction2() {
-	windDirectionPulse2 = millis() * 1000;
-	detachInterrupt(0);
-	attachInterrupt(0, ISR_for_Direction3, RISING);
-	delayMicroseconds(5000);
+	if (debounceDir < millis()){
+		windDirectionPulse2 = micros();
+		detachInterrupt(0);
+		attachInterrupt(0, ISR_for_Direction3, RISING);
+		debounceDir = millis() + 10;
+	}
 }
 
 void ISR_for_Direction3() {
-	windDirectionPulse3 = millis() * 1000;
-	detachInterrupt(0);
-	wdpulse = true;
+	if (debounceDir < millis()){
+		windDirectionPulse3 = millis() * 1000;
+		detachInterrupt(0);
+		wdpulse = true;
+	}
 }
 
 void ISR_for_Speed1() {
-	windSpeedPulse1 = millis() * 1000;
-	detachInterrupt(1);
-	attachInterrupt(1, ISR_for_Speed2, RISING);
-	delayMicroseconds(5000);
+	if (debounceWin < millis()){
+		windSpeedPulse1 = micros();
+		detachInterrupt(1);
+		attachInterrupt(1, ISR_for_Speed2, RISING);
+		debounceWin = millis() + 10;
+	}
 }
 
 void ISR_for_Speed2() {
-	windSpeedPulse2 = millis() * 1000;
-	detachInterrupt(1);
-	attachInterrupt(1, ISR_for_Speed3, RISING);
-	delayMicroseconds(5000);
+	if (debounceWin < millis()){
+		windSpeedPulse2 = micros();
+		detachInterrupt(1);
+		attachInterrupt(1, ISR_for_Speed3, RISING);
+		debounceWin = millis() + 10;
+	}
 }
 
 void ISR_for_Speed3() {
-	windSpeedPulse3 = millis() * 1000;
-	detachInterrupt(1);
-	wspulse = true;
-
+	if (debounceWin < millis()){
+		windSpeedPulse3 = micros();
+		detachInterrupt(1);
+		wspulse = true;
+	}
 }
 
 
@@ -200,16 +213,9 @@ void setup()
 
 	//set the fona time and start time estimation
 	boolean setTimeError = !setFonaTime(); //make sure the cell can get the time and sets the variable fonaTime
-	estimatedTime = timeToSeconds(fonaTime) * 1000; //starts estimated time to the current time
+	currentTime = timeToSeconds(fonaTime);
+	estimatedTime = currentTime * 1000; //starts estimated time to the current time
 	prevMillis = millis(); //this is a setup fir the updateTimeEst() func
-	estimatedTimePrev = estimatedTime;
-	previousTime = estimatedTimePrev / 1000;
-	Serial.print(F("  currentTime: ")); Serial.println(currentTime);
-	Serial.print(F("    =")); secondsToText(currentTime); Serial.println();
-	Serial.print(F("  estimatedTime: ")); Serial.println(estimatedTime);
-	Serial.print(F("    =")); secondsToText(estimatedTime); Serial.println();
-	Serial.print(F("  previousTime: ")); Serial.println(previousTime);
-	Serial.print(F("  estimatedTimePRev: ")); Serial.println(estimatedTimePrev);
 
 	//// Get Wakeup Schedule
 	//if (debugMode){
@@ -223,7 +229,7 @@ void setup()
 	boolean endNetworkError = !endNetwork();
 	boolean stopFonaError = stopFona();
 
-	updateTimeEst();
+	updateTimeEst(false);
 	sendTime = getTargetTime(sendInterval, estimatedTime / 1000); //Returns value in Seconds format
 	senseTime = getTargetTime(senseInterval, estimatedTime / 1000);//Returns value in Seconds format
 	duration = getSenseDuration(senseDuration, estimatedTime / 1000);//Returns value in Seconds format
@@ -249,7 +255,7 @@ void setup()
 		Serial.println(F("  No errors found!"));
 	}
 
-	updateTimeEst();
+	updateTimeEst(false);
 	Serial.println(F("Important Times"));
 	Serial.print(F("  estimatedTime: ")); secondsToText(estimatedTime / 1000); Serial.println();
 	Serial.print(F("  senseTime: ")); secondsToText(senseTime); Serial.println();
@@ -279,7 +285,7 @@ void loop()
 
 		//waits for the pulses
 		while (estimatedTime <= (senseTime * 1000 + duration * 1000) && !wspulse || !wdpulse){
-			updateTimeEst();
+			updateTimeEst(false);
 		}
 
 		long prevWDInterval = windDirectionPulse2 - windDirectionPulse1;;
@@ -334,7 +340,7 @@ void loop()
 		}
 		lastWindSense = estimatedTime;
 
-		updateTimeEst();
+		updateTimeEst(false);
 
 	}//End of sense wind loop
 
@@ -375,6 +381,8 @@ void loop()
 		buildDataURL(intToText(windSpeedAvg * 10, 4, textOut), 58, 61);		//aws
 		buildDataURL(intToText(maxWS * 10, 4, textOut), 67, 70);		//pws
 		buildDataURL(intToText(windDirectionAvg, 3, textOut), 75, 77);		//wd
+		buildDataURL(intToText(minWD, 3, textOut), 160, 162);		//mwd
+		buildDataURL(intToText(minWD, 3, textOut), 168, 170);		//pwd
 		buildDataURL(intToText(temp1, 3, textOut), 82, 85);		//t1
 		buildDataURL(intToText(temp2, 3, textOut), 90, 93);		//t2
 		buildDataURL(intToText(humidity1, 3, textOut), 98, 100);	//h1
@@ -389,23 +397,31 @@ void loop()
 
 		//send data code
 		readURL(sendDataURL);
+
 		Serial.println(F("\n-----Updating time estimate-----"));
 		if (getFonaTime()){ //Get actual time from the FONA realtime clock.
 			stopFona();
-			previousTime = currentTime;
+			unsigned long previousTime = currentTime;
 			currentTime = timeToSeconds(fonaTime); //Convert seconds to millis			
 			Serial.print(F("  currentTime: ")); Serial.println(currentTime);
 			Serial.print(F("    =")); secondsToText(currentTime); Serial.println();
 			Serial.print(F("  estimatedTime: ")); Serial.println(estimatedTime / 1000);
 			Serial.print(F("    =")); secondsToText(estimatedTime / 1000); Serial.println();
 			Serial.print(F("  previousTime: ")); Serial.println(previousTime);
-			Serial.print(F("  estimatedTimePRev: ")); Serial.println(estimatedTimePrev / 1000);
 			unsigned long tempTime = estimatedTime;
-			updateTimeEst();
-			long timeError = ((long)currentTime - (long)previousTime) - ((long)estimatedTime / 1000 - (long)estimatedTimePrev / 1000); //Calculate the error between the estimated time and the actual time.
+			updateTimeEst(false);
+			long timeError;
+
+			if (currentTime >= estimatedTime){
+				timeError = -(currentTime - (estimatedTime/1000));
+			}
+			else{
+				timeError = ((estimatedTime/1000) - currentTime);
+			}
+
 			Serial.print(F("Time Error: ")); Serial.println(timeError);
-			timerAdjustment = (((long)currentTime - (long)previousTime) / ((long)estimatedTime / 1000 - (long)estimatedTimePrev / 1000)) - 1000;
-			Serial.print(F("  timerAdjustment: ")); Serial.println(timerAdjustment);
+			/*timerAdjustment = currentTime/(estimatedTime/1000);
+			Serial.print(F("  timerAdjustment: ")); Serial.println(timerAdjustment);*/
 
 			if (timerAdjustment >= 40){
 				timerAdjustment = 40;
@@ -413,7 +429,7 @@ void loop()
 			else if (timerAdjustment <= -40){
 				timerAdjustment = -40;
 			}
-			timerCalibration += timerAdjustment;
+			timerCalibration += timeError;
 			if (timerCalibration >= 1300){
 				timerCalibration = 1300;
 			}
@@ -421,9 +437,8 @@ void loop()
 				timerCalibration = 700;
 			}
 
-			Serial.print(F("Timer Adjustment = ")); Serial.println(timerAdjustment);
+			/*Serial.print(F("Timer Adjustment = ")); Serial.println(timerAdjustment);*/
 			Serial.print(F("Timer Calibration = ")); Serial.println(timerCalibration);
-			estimatedTimePrev = tempTime;
 		}
 		else {
 			stopFona();
@@ -435,8 +450,12 @@ void loop()
 		maxWS = -1;
 		maxWD = -1;
 		minWD = 361;;
-		updateTimeEst();
+		updateTimeEst(true);
 		sendTime = getTargetTime(sendInterval, estimatedTime / 1000);//Returns value in Seconds format
+		senseTime = getTargetTime(senseInterval, estimatedTime / 1000);//Returns value in Seconds format
+		duration = getSenseDuration(senseDuration, estimatedTime / 1000);//Returns value in Seconds format
+		Serial.print(F("  Next senseTime: ")); secondsToText(senseTime); Serial.println();
+		Serial.print(F("  Next sendTime: ")); secondsToText(sendTime); Serial.println();
 	}//end of send Data
 
 	sleep();
@@ -690,11 +709,11 @@ boolean stopFona(){
 	return running;
 }
 
-void updateTimeEst(){
+void updateTimeEst(boolean sentTime){
 	//Serial.println(F("\n\n-----Updating estimated time-----"));
 	estimatedTime += millis() - prevMillis;
 	prevMillis = millis();
-	if (estimatedTime >= 86400000){
+	if (sentTime && estimatedTime >= 86400000){
 		estimatedTime = 0;
 		sendTime = getTargetTime(sendInterval, estimatedTime / 1000); //get next if we reset to zero
 	}
@@ -860,7 +879,7 @@ void sleep(){
 		// The millis timer (driven by 8mhz external crystal) halts while the CPU is powered off.
 		LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);//Code stops here until 8s timer expires. Time keeping during power down is based upon inaccurate clock internal to PLC instead of external 8mhz crystal.
 		prevMillis = millis();//millis timer is working again so grab the current millis value
-		estimatedTime += sleepDuration * 1100;//timerCalibration; //add the calibrated sleep duration back into the estimated time.
+		estimatedTime += sleepDuration * 1100;//* timerCalibration; //add the calibrated sleep duration back into the estimated time.
 		Serial.println(F("  Awake"));
 		Serial.print(F("    timerCalibration: ")); Serial.println(timerCalibration);
 		Serial.print(F("    Current time is ")); secondsToText(estimatedTime / 1000); Serial.println();
