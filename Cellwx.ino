@@ -382,7 +382,7 @@ void loop()
 		buildDataURL(intToText(maxWS * 10, 4, textOut), 67, 70);		//pws
 		buildDataURL(intToText(windDirectionAvg, 3, textOut), 75, 77);		//wd
 		buildDataURL(intToText(minWD, 3, textOut), 160, 162);		//mwd
-		buildDataURL(intToText(minWD, 3, textOut), 168, 170);		//pwd
+		buildDataURL(intToText(maxWD, 3, textOut), 168, 170);		//pwd
 		buildDataURL(intToText(temp1, 3, textOut), 82, 85);		//t1
 		buildDataURL(intToText(temp2, 3, textOut), 90, 93);		//t2
 		buildDataURL(intToText(humidity1, 3, textOut), 98, 100);	//h1
@@ -715,7 +715,6 @@ void updateTimeEst(boolean sentTime){
 	prevMillis = millis();
 	if (sentTime && estimatedTime >= 86400000){
 		estimatedTime = 0;
-		sendTime = getTargetTime(sendInterval, estimatedTime / 1000); //get next if we reset to zero
 	}
 }
 
@@ -879,7 +878,7 @@ void sleep(){
 		// The millis timer (driven by 8mhz external crystal) halts while the CPU is powered off.
 		LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);//Code stops here until 8s timer expires. Time keeping during power down is based upon inaccurate clock internal to PLC instead of external 8mhz crystal.
 		prevMillis = millis();//millis timer is working again so grab the current millis value
-		estimatedTime += sleepDuration * 1100;//* timerCalibration; //add the calibrated sleep duration back into the estimated time.
+		estimatedTime += sleepDuration * timerCalibration; //add the calibrated sleep duration back into the estimated time.
 		Serial.println(F("  Awake"));
 		Serial.print(F("    timerCalibration: ")); Serial.println(timerCalibration);
 		Serial.print(F("    Current time is ")); secondsToText(estimatedTime / 1000); Serial.println();
