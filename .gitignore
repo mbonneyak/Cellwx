@@ -4,3 +4,9 @@ Visual Micro/.Cellwx.vsarduino.h
 Visual Micro/Compile.vmps.xml
 Visual Micro/Configuration.Debug.vmps.xml
 Visual Micro/Upload.vmps.xml
+Cellwx.opensdf
+Cellwx.sdf
+Cellwx.sdf
+*.sdf
+Cellwx.v12.suo
+Cellwx.vcxproj.user
